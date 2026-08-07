@@ -6,17 +6,32 @@ OS: Ubuntu 26.04 LTS, kernel `7.0.0-29-generic`
 
 This repo collects what works/doesn't work and the fixes applied to run Ubuntu well on this laptop.
 
-## General status
+## Component status
 
-- Internal display, touchpad, keyboard: working.
-- Hybrid Intel/NVIDIA graphics: working, using the `xe` driver for the integrated Intel GPU (see below) and the proprietary NVIDIA driver for the discrete GPU.
-- VRR (Variable Refresh Rate) on the internal panel: working, but with a known GNOME/Mutter bug on resume from sleep (see below).
+| Component | Status | Notes |
+|---|---|---|
+| Internal display (panel) | ✅ Working | — |
+| VRR (panel, Variable Refresh Rate) | ✅ Working | ⚠️ Known GNOME/Mutter bug loses VRR sync on resume from sleep — workaround in fix #5 |
+| Touchpad (Synaptics `SYNA2BA6:00`) | ✅ Working | ⚠️ Middle-click needs the `gsettings` fix in #3, otherwise misbehaves |
+| Keyboard | ✅ Working | — |
+| Trackpad scroll speed (Wayland) | ✅ Working | Needs the **Wayland Scroll Factor** app, see fix #4 — no native GNOME control |
+| Webcam (Bison Electronics, RGB) | ✅ Working | `/dev/video0`/`video1` |
+| IR camera (Windows Hello-style) | 🟡 Working, needs manual setup | No pre-built Howdy package for Ubuntu 26.04 (`resolute`) yet — built from source, see `howdy` section below. `/dev/video2`/`video3` |
+| Intel Arrow Lake-P iGPU | ✅ Working | Runs on `xe` driver (fix #1) — not required, but smoother and `i915` is being phased out |
+| NVIDIA RTX 5060 Max-Q (dGPU) | ✅ Working | ⚠️ Use driver **610-open or newer** for correct gaming performance, see fix #1b |
+| Hybrid graphics switching | ✅ Working | — |
+| GPU performance (overall) | 🟡 Conditional | ⚠️ Requires the `performance` power profile — `balanced`/`power-saver` caps GPU usage, see fix #2 |
+| Suspend/resume (s2idle) | ✅ Working | NVIDIA suspend/resume/hibernate systemd units present and hooked in; not yet stress-tested — see TODO |
+| Occasional GPU hangs/freezes | 🟡 Rare, unresolved upstream | Tracked as [i915 kernel#14469](https://gitlab.freedesktop.org/drm/i915/kernel/-/issues/14469) — see fix #6. Uncertain whether it fully applies to Arrow Lake vs. the Meteor Lake hardware in that thread |
+| Firefox (Snap build) | ❌ Broken | No Intel Arc hardware acceleration — replace with `.deb` build, see fix #7 |
+| Wi-Fi / Bluetooth | ✅ Working | — |
+| Battery / power management | ✅ Working | — |
 
 ## Fixes applied
 
 ### 1. Intel graphics driver: `i915` disabled in favor of `xe`
 
-Arrow Lake-P needs the newer `xe` kernel driver instead of the legacy `i915` for correct support (in particular for VRR and power management).
+Not strictly required — Arrow Lake-P works with either driver — but `xe` gives a noticeably smoother experience (better power management, fewer glitches) and `i915` is the legacy driver being phased out across the board for newer Intel GPUs. Switching now avoids depending on a driver that's being deprecated.
 
 Configured via kernel cmdline in `/etc/default/grub`:
 
@@ -30,6 +45,19 @@ Verify it's active:
 ```
 lsmod | grep -E '^xe |^i915'
 cat /proc/cmdline
+```
+
+### 1b. NVIDIA driver: use at least version 610 (open kernel modules)
+
+Strongly recommended: install NVIDIA driver **610-open or newer** (`nvidia-driver-610-open`). Older driver versions have noticeably worse gaming performance on this GPU (RTX 5060 Max-Q, Blackwell architecture) — the open-kernel-module variant is now the recommended/default one for this GPU generation, not the legacy proprietary modules.
+
+Check current version:
+```
+nvidia-smi --query-gpu=driver_version,name --format=csv
+```
+Install/upgrade:
+```
+sudo apt install nvidia-driver-610-open
 ```
 
 ### 2. Performance mode required to use the full GPU

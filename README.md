@@ -11,7 +11,7 @@ This repo collects what works/doesn't work and the fixes applied to run Ubuntu w
 | Component | Status | Notes |
 |---|---|---|
 | Internal display (panel) | ✅ Working | — |
-| VRR (panel, Variable Refresh Rate) | ✅ Working | ⚠️ Known GNOME/Mutter bug loses VRR sync on resume from sleep — workaround in fix #5 |
+| VRR (panel, Variable Refresh Rate) | ✅ Working | ⚠️ Known GNOME/Mutter bug: after resume from sleep, the brightness keys stop working because GNOME selects the wrong backlight device — workaround in fix #5 |
 | Touchpad (Synaptics `SYNA2BA6:00`) | ✅ Working | ⚠️ Middle-click needs the `gsettings` fix in #3, otherwise misbehaves |
 | Keyboard | ✅ Working | — |
 | Trackpad scroll speed (Wayland) | ✅ Working | Needs the **Wayland Scroll Factor** app, see fix #4 — no native GNOME control |
@@ -93,7 +93,7 @@ Used to fix scroll speed/factor on Wayland (where GNOME doesn't expose a native 
 
 ### 5. VRR toggle around sleep/resume (GNOME/Mutter bug workaround)
 
-Known bug: after resuming from sleep, Mutter sometimes picks the wrong backlight/display or fails to correctly re-negotiate VRR with the panel (similar to [mutter#4111](https://gitlab.gnome.org/GNOME/mutter/-/work_items/4111) and [mutter#3419](https://gitlab.gnome.org/GNOME/mutter/-/issues/3419)). The workaround is to force a full modeset (flip VRR ON→OFF or OFF→ON and restore) right after resume.
+Known bug: after resuming from sleep, GNOME picks the wrong backlight device for this panel, so the brightness keys stop responding (similar underlying Mutter display re-detection issue as [mutter#4111](https://gitlab.gnome.org/GNOME/mutter/-/work_items/4111) and [mutter#3419](https://gitlab.gnome.org/GNOME/mutter/-/issues/3419)). The workaround is to force a full modeset (flip VRR ON→OFF or OFF→ON and restore) right after resume, which makes Mutter re-enumerate the outputs and pick the correct backlight again.
 
 Files in this repo:
 - `scripts/toggle-vrr.sh` — CLI: `toggle-vrr.sh on|off|kick`. Uses only `gdbus` + `perl` (no extra dependencies) to talk to `org.gnome.Mutter.DisplayConfig` over D-Bus. `kick` reads the current state, flips it, then restores it — forcing the modeset. It rebuilds the full monitor configuration from Mutter's current state every time, so any other connected monitor (e.g. an external display while docked) is preserved unchanged on its current mode — only the built-in panel's (`eDP-*`) mode gets the `+vrr` suffix added/removed. Safe to run docked or undocked.

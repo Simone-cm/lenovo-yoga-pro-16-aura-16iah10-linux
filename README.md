@@ -140,11 +140,12 @@ Summary of the upstream investigation so far:
 **Practical takeaway for this laptop**: no guaranteed fix exists yet. If freezes start happening more than "rare":
 1. Check installed BIOS/ME firmware and update via Lenovo's site if a newer Intel ME/CSME package is available (check current version with `cat /sys/class/mei/mei0/fw_ver`).
 2. Watch [issue #14469](https://gitlab.freedesktop.org/drm/i915/kernel/-/issues/14469) for updates.
-3. As a last resort if it becomes disruptive, disabling RC6 via BIOS (if the option exists) trades battery/thermals for stability, per multiple upstream reports.
 
 ### 7. Firefox from Snap breaks Intel Arc hardware acceleration
 
 The Snap build of Firefox (Ubuntu's default) has a known bug where it fails to use Intel Arc's graphics acceleration (VA-API/hardware video decode, WebGL rendering offload), unlike the `.deb` build.
+
+Root cause tracked upstream: [Mozilla Bugzilla #1994248 — "Firefox snap doesn't support hardware acceleration for modern GPUs"](https://bugzilla.mozilla.org/show_bug.cgi?id=1994248) (open, unconfirmed as of the last check). The report is filed against an AMD Radeon RX 9070, but the root cause is the same for Intel Arc: the Snap is built on Ubuntu's `core22` base, which bundles a Mesa version too old to have driver support for newer GPU silicon (Mesa 25.0.7+ is needed; `core22` predates it). Firefox falls back to CPU-only decoding when it can't initialize hardware acceleration, driving CPU usage to ~100% during video playback. A related earlier bug on the same root cause, already fixed once for older Intel iGPUs: [Bugzilla #1760941 — "Update Snap to core22 to have an intel-media-driver version that supports Iris Xe"](https://bugzilla.mozilla.org/show_bug.cgi?id=1760941) — confirming this has repeatedly been an issue of the Snap's bundled Mesa/media-driver lagging behind new Intel GPU generations, Arc included.
 
 Fix: remove the Snap package and reinstall Firefox from the official `.deb` (Mozilla PPA or Mozilla's `.deb` archive):
 ```

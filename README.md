@@ -156,6 +156,12 @@ sudo apt install firefox
 ```
 (Ubuntu ships a pin that keeps preferring the Snap even after adding the PPA — you may need an `/etc/apt/preferences.d/mozilla-firefox` pin forcing the PPA/`.deb` package to be picked over the Snap; check `apt policy firefox` after installing to confirm the `.deb` version wins.)
 
+### 8. Howdy (IR face login) — no Ubuntu 26.04 package, built from source
+
+This laptop's IR camera (`Bison Electronics`, `/dev/video2`/`video3`) supports Windows-Hello-style face login via [Howdy](https://github.com/boltgolt/howdy), but there is no pre-built `.deb` for Ubuntu 26.04 (`resolute`) yet — the `ppa:boltgolt/howdy` PPA only publishes up to `questing` (25.10) as of this writing.
+
+Following the community install guide from [howdy issue #1135](https://github.com/boltgolt/howdy/issues/1135) (originally written for Fedora 44, same underlying problem: no packages for the newest OS release), adapted for Debian/Ubuntu: build from source with Meson, install `dlib` via pip, download the face-recognition models manually, then wire Howdy into PAM for `sudo`/`polkit`/`gdm`. See build/setup notes and status as this is completed.
+
 ## TODO / to investigate
 
 - Document any suspend/hibernate fixes needed for NVIDIA (there are `nvidia-suspend.service` / `nvidia-resume.service` / `nvidia-hibernate.service` units already hooked into systemd — verify whether they're sufficient or need overrides).

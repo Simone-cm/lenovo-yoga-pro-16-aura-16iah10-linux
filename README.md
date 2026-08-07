@@ -16,7 +16,7 @@ This repo collects what works/doesn't work and the fixes applied to run Ubuntu w
 | Keyboard | ✅ Working | — |
 | Trackpad scroll speed (Wayland) | ✅ Working | Needs the **Wayland Scroll Factor** app, see fix #4 — no native GNOME control |
 | Webcam (Bison Electronics, RGB) | ✅ Working | `/dev/video0`/`video1` |
-| IR camera (Windows Hello-style) | 🟡 Working, needs manual setup | No pre-built Howdy package for Ubuntu 26.04 (`resolute`) yet — built from source, see `howdy` section below. `/dev/video2`/`video3` |
+| IR camera (Windows Hello-style) | ✅ Working | No pre-built Howdy package for Ubuntu 26.04 (`resolute`) yet — built from source and working, see fix #8. `/dev/video2`/`video3` |
 | Intel Arrow Lake-P iGPU | ✅ Working | Runs on `xe` driver (fix #1) — not required, but smoother and `i915` is being phased out |
 | NVIDIA RTX 5060 Max-Q (dGPU) | ✅ Working | ⚠️ Use driver **610-open or newer** for correct gaming performance, see fix #1b |
 | Hybrid graphics switching | ✅ Working | — |
@@ -156,11 +156,93 @@ sudo apt install firefox
 ```
 (Ubuntu ships a pin that keeps preferring the Snap even after adding the PPA — you may need an `/etc/apt/preferences.d/mozilla-firefox` pin forcing the PPA/`.deb` package to be picked over the Snap; check `apt policy firefox` after installing to confirm the `.deb` version wins.)
 
-### 8. Howdy (IR face login) — no Ubuntu 26.04 package, built from source
+### 8. Howdy (IR face login) — built from source, working end-to-end
 
-This laptop's IR camera (`Bison Electronics`, `/dev/video2`/`video3`) supports Windows-Hello-style face login via [Howdy](https://github.com/boltgolt/howdy), but there is no pre-built `.deb` for Ubuntu 26.04 (`resolute`) yet — the `ppa:boltgolt/howdy` PPA only publishes up to `questing` (25.10) as of this writing.
+This laptop's IR camera (`Bison Electronics`, device `/dev/video2`, capture-capable, separate USB interface `1.2` from the RGB webcam on `1.0`) supports Windows-Hello-style face login via [Howdy](https://github.com/boltgolt/howdy). There is no pre-built `.deb` for Ubuntu 26.04 (`resolute`) yet — the `ppa:boltgolt/howdy` PPA only publishes up to `questing` (25.10) as of this writing — so it's built from source. Loosely based on the community install guide from [howdy issue #1135](https://github.com/boltgolt/howdy/issues/1135) (written for Fedora 44, same underlying problem of no packages for the newest OS release), adapted for Debian/Ubuntu, using a **venv instead of `pip --break-system-packages`** to avoid touching the system Python.
 
-Following the community install guide from [howdy issue #1135](https://github.com/boltgolt/howdy/issues/1135) (originally written for Fedora 44, same underlying problem: no packages for the newest OS release), adapted for Debian/Ubuntu: build from source with Meson, install `dlib` via pip, download the face-recognition models manually, then wire Howdy into PAM for `sudo`/`polkit`/`gdm`. See build/setup notes and status as this is completed.
+Full working procedure, in order:
+
+**1. Install build dependencies:**
+```
+sudo apt install -y git curl meson bzip2 python3-dev python-is-python3 make cmake g++ \
+  libpam0g-dev libinih-dev libevdev-dev libopencv-dev python3-opencv python3-pip pkg-config
+```
+(`python-is-python3` and `libevdev-dev` aren't in the original Fedora guide — Debian/Ubuntu need both; without them `meson setup` fails, the first looking for `/usr/bin/python`, the second for the missing `libevdev` pkg-config dependency.)
+
+**2. Clone and build:**
+```
+git clone https://github.com/boltgolt/howdy ~/howdy
+cd ~/howdy
+meson setup build
+meson compile -C build
+sudo meson install -C build
+```
+
+**3. Download the face-recognition models** (a helper script is already installed, no manual `curl`/`bzip2` needed like on Fedora):
+```
+cd /usr/local/share/dlib-data
+sudo bash install.sh
+```
+
+**4. Install `dlib`/`elevate` in an isolated venv** (instead of `pip install --break-system-packages` into the system Python — Ubuntu's system pip is externally-managed by design and there's no need to fight that just for two packages):
+```
+sudo python3 -m venv --system-site-packages /opt/howdy-venv
+sudo /opt/howdy-venv/bin/pip install dlib elevate
+```
+`--system-site-packages` lets the venv still see the apt-installed `python3-opencv` without reinstalling it.
+
+**5. Point Howdy's build at the venv's interpreter and reinstall** (`python_path` is a real meson option — it configures both the CLI wrapper script and the compiled PAM module's embedded Python path):
+```
+cd ~/howdy
+meson configure build -Dpython_path=/opt/howdy-venv/bin/python3
+meson compile -C build
+sudo meson install -C build
+```
+Verify: `head -1 /usr/local/bin/howdy` should show `/opt/howdy-venv/bin/python3`, and `strings /usr/local/lib/x86_64-linux-gnu/security/pam_howdy.so | grep howdy-venv` should match.
+
+**6. Fix the PAM module search path (Debian/Ubuntu-specific, not needed on Fedora)**: Meson installs `pam_howdy.so` to `/usr/local/lib/x86_64-linux-gnu/security/`, but PAM only looks in `/lib/x86_64-linux-gnu/security/` — without this symlink, PAM silently ignores the `pam_howdy.so` line later and just falls through to password, with no visible error:
+```
+sudo ln -sf /usr/local/lib/x86_64-linux-gnu/security/pam_howdy.so /lib/x86_64-linux-gnu/security/pam_howdy.so
+```
+
+**7. Set the camera device and add a face:**
+```
+sudo howdy config
+```
+Set `device_path = /dev/video2` under `[video]`, save and exit. Then:
+```
+sudo howdy add
+sudo howdy test
+```
+
+**8. Tune detection thresholds** — the defaults were miscalibrated for this camera/IR sensor combo. Symptoms and fixes actually needed on this laptop:
+- `howdy test` showed a clean, well-lit IR image but was marked `DARK FRAME` — the IR emitter was fine, `dark_threshold` (default `60`) was just below this camera's normal average frame darkness (~68.5). Fixed by raising it:
+  ```
+  sudo sed -i 's/^dark_threshold = 60/dark_threshold = 80/' /usr/local/etc/howdy/config.ini
+  ```
+- `sudo whoami` sometimes worked, sometimes hit `Failure, timeout reached` (visible as the scan circle flickering green/red without locking a match in time) — the default `timeout = 4` / `certainty = 3.5` were too tight for a reliable match. Fixed by relaxing both slightly (`certainty` above 5 is not recommended, 4.2 stays well under that):
+  ```
+  sudo sed -i 's/^timeout = 4/timeout = 6/' /usr/local/etc/howdy/config.ini
+  sudo sed -i 's/^certainty = 3.5/certainty = 4.2/' /usr/local/etc/howdy/config.ini
+  ```
+(**Note**: `sudo howdy config` opens the file in `nano`/`$EDITOR` — if you edit it that way instead of `sed`, make sure you actually save with `Ctrl+O` before exiting; a silent no-op edit was the initial cause of the `dark_threshold` fix not taking effect here.)
+
+**9. Wire Howdy into PAM for `sudo`, `polkit`, and GDM login** — always as `auth sufficient`, never `required`, so a failed/no camera falls through to the normal password prompt instead of locking you out:
+```
+sudo cp /etc/pam.d/sudo /etc/pam.d/sudo.bak-pre-howdy
+sudo cp /etc/pam.d/gdm-password /etc/pam.d/gdm-password.bak-pre-howdy
+sudo cp /usr/lib/pam.d/polkit-1 /etc/pam.d/polkit-1
+
+sudo sed -i '/^@include common-auth/i auth\tsufficient\tpam_howdy.so' /etc/pam.d/sudo
+sudo sed -i '/^@include common-auth/i auth\tsufficient\tpam_howdy.so' /etc/pam.d/polkit-1
+sudo sed -i '/^auth.*pam_nologin.so/a auth\tsufficient\tpam_howdy.so' /etc/pam.d/gdm-password
+```
+Test without closing the current session first (in case something needs reverting from the `.bak-pre-howdy` copies):
+```
+sudo -k
+sudo whoami
+```
+Should trigger the IR camera before falling back to password if face auth fails.
 
 ## TODO / to investigate
 
